@@ -1,1 +1,102 @@
-Test
+#!/bin/bash
+
+# Define paths
+MAIL_SCRIPT="/Library/scripts/block_nativemail.sh"  # Global path for all users
+PLIST_PATH="$HOME/Library/LaunchAgents/com.company.blocknativemail.plist"
+
+# Function to check and set executable permissions for a file
+check_and_set_permissions() {
+  local file_path=$1
+  if [ -f "$file_path" ]; then
+    # Check if the file is executable
+    if [ ! -x "$file_path" ]; then
+      echo "Setting executable permissions for $file_path"
+      sudo chmod +x "$file_path"
+    else
+      echo "$file_path is already executable."
+    fi
+  else
+    echo "$file_path does not exist."
+  fi
+}
+
+# Create the directory for /Library/scripts if it doesn't exist
+sudo mkdir -p "/Library/scripts"
+
+# Create the block_nativemail.sh script with content
+echo "#!/bin/bash
+
+# Infinite loop to monitor Mail.app process
+while true; do
+    # Check if Mail.app is running
+    pid=\$(pgrep -x \"Mail\")
+
+    # If Mail.app is running, kill it
+    if [ -n \"\$pid\" ]; then
+        echo \"Mail.app is running. Terminating it...\" >> \$HOME/scripts/monitor_mail.log
+        kill -9 \"\$pid\"  # Forcefully kill the Mail.app process
+    fi
+
+    # Sleep for 2 seconds before checking again
+    sleep 2
+done" | sudo tee "$MAIL_SCRIPT" > /dev/null
+
+# Ensure block_nativemail.sh has executable permissions
+check_and_set_permissions "$MAIL_SCRIPT"
+
+# Create the LaunchAgents directory if it doesn't exist
+mkdir -p "$HOME/Library/LaunchAgents"
+
+# Create the plist file with the required content if it doesn't exist
+if [ ! -f "$PLIST_PATH" ]; then
+  echo "Creating the plist file: $PLIST_PATH"
+  tee "$PLIST_PATH" > /dev/null << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+<key>Label</key>
+<string>com.company.blocknativemail</string>
+<key>ProgramArguments</key>
+<array>
+<string>/bin/bash</string>
+<string>/Library/scripts/block_nativemail.sh</string>
+</array>
+<key>RunAtLoad</key>
+<true/>
+<key>KeepAlive</key>
+<true/>
+<key>EnvironmentVariables</key>
+<dict>
+<key>PATH</key>
+<string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin</string>
+</dict>
+</dict>
+</plist>
+EOF
+else
+  echo "Plist file already exists: $PLIST_PATH"
+fi
+
+# Ensure plist file has correct permissions (plist files don't need +x, but we can ensure it's readable)
+if [ -f "$PLIST_PATH" ]; then
+  echo "Setting read permissions for plist file: $PLIST_PATH"
+  chmod 644 "$PLIST_PATH"  # Correct permission for plist file
+else
+  echo "$PLIST_PATH does not exist."
+fi
+
+# Check if LaunchAgent plist file exists and if it's loaded
+if launchctl list | grep -q "com.company.blocknativemail"; then
+  echo "LaunchAgent com.company.blocknativemail is already loaded."
+else
+  echo "LaunchAgent com.company.blocknativemail is not loaded. Loading it now..."
+
+  # Use launchctl to load the plist (no sudo required, it's user-specific)
+  launchctl load -w "$PLIST_PATH"
+  if [ $? -eq 0 ]; then
+    echo "LaunchAgent com.company.blocknativemail has been loaded successfully."
+  else
+    echo "Failed to load LaunchAgent com.company.blocknativemail."
+  fi
+fi
